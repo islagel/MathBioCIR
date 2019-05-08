@@ -1,3 +1,5 @@
+# TO USE THIS CODE, COPY IT INTO AN R SCRIPT AND RUN #
+
 ########## Before Model Fitting #########
 #### Load neccessary packages ####
 library(manipulate)
