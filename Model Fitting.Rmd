@@ -1,0 +1,801 @@
+---
+title: "Model Fitting"
+date: "4/4/2019"
+output:
+  html_document:
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(manipulate)# Need for manipulate 
+library(FME)# Needed for modFit function
+library(tidyverse)# Needed for plotting and data manipulation
+library(readxl) # Needed for reading in data. 
+library(lubridate) # Needed for date and time data manipulation
+cbPalette <- c("#009E73", "#0072B2", "#999999", "#E69F00", "#56B4E9",  "#F0E442",  "#D55E00")
+
+```
+
+
+# Model Fitting 
+
+## Lotka Voltera Comeptition
+
+In this document we will be fitting the Lotka Volterra Competition model (as seen below). 
+
+$$\frac{dS}{dt}=r_S*S(1-\frac{S}{K_S})-\alpha_S*S*C$$
+
+$$\frac{dC}{dt}=r_C*C(1-\frac{C}{K_C})-\alpha_C*S*C$$
+
+
+In this chunk we read in the data, created two new columns that are the average population count on each day, and then created a day column that is from day 1 to dat 19. Note, for this chunck to work you need to add the file path to where the data is located on your computer.
+
+```{r Reading in Data}
+algae_dilluted_data<- read_excel("~/MathBio/Data/Algae Data Diluted.xlsx")# Reading in the data
+start_date=algae_dilluted_data$Date[1]# Grabbing what the first day we took data is. 
+algae_dilluted_data=algae_dilluted_data%>%
+  mutate(Scene_Average=(Scene_Count_1+Scene_Count_2+Scene_Count_3+Scene_Count_4# Calculating the average scene on each day
+                        +Scene_Count_5+Scene_Count_6+Scene_Count_7+Scene_Count_8)/8,
+         Clamy_Average=(Clamy_Count_1+Clamy_Count_2+Clamy_Count_3+Clamy_Count_4# Calculating the average chlamy on each day. 
+                        +Clamy_Count_5+Clamy_Count_6+Clamy_Count_7+Clamy_Count_8)/8)%>%
+  mutate(day=as.numeric(difftime(Date, start_date, units="days"))+1)
+
+algae_dilluted_data_subset=algae_dilluted_data%>%
+  select(day, Flask, Scene_Average, Clamy_Average) # selecting only the columns that I will need going forward. 
+```
+
+Here we created our function in r to describe the differential equations and then tested it with some parameter estimates and plotted it to make sure everything is working right.
+
+```{r model building and testing}
+compderivs=function(t,pop,parms) { # function to describe differential equations
+  with(as.list(c(pop,parms)), {
+    S=pop[1]
+    C=pop[2]
+    rS=parms[1]
+    kS=parms[2]
+    alphaS=parms[3]
+    rC=parms[4]
+    kC=parms[5]
+    alphaC=parms[6]
+    dS=rS*S*(1-(S/kS))-alphaS*S*C
+    dC=rC*C*(1-(C/kC))-alphaC*C*S
+    list(c(dS,dC))
+  }
+)}
+
+
+yinitcomp=c(0.01,0.01) #initial conditions
+parms=c(.0001,400,.004,.07,.400,.04) # parameter esitmates (really just some random numbers we picked)
+t=seq(0,19, length=1000) # our time
+outcomp=ode(y=yinitcomp,times=t,func = compderivs, parms=parms) # numerically solving thwe differential equation
+
+
+outcomp=as_tibble(outcomp) # Making a tibble so that we can plot it easier
+comp_test=outcomp%>% # renaming the columns
+  rename("Scene"=`1`, 
+         "Clamy"=`2`)
+
+comp_test%>% # plotting just to test everything out
+  ggplot()+
+  geom_line(aes(x=time, y=Scene), color="red")+
+  geom_line(aes(x=time, y=Clamy), color="blue")
+
+```
+
+## Manipulate General Usage
+
+This is the code that we used for finding parameter estimates for all of our models. When we switch flasks we just change the points that we are plotting to the corresponding flask. Note, for this to work you need to add the file path to the data on your computer. 
+
+```{r, eval=FALSE}
+algae_dilluted_data<- read_excel("~/MathBio/Data/Algae Data Diluted.xlsx") # loading data
+start_date=algae_dilluted_data$Date[1]
+algae_dilluted_data=algae_dilluted_data%>% # cleaning up the data and taking some averages
+  mutate(Scene_Average=(Scene_Count_1+Scene_Count_2+Scene_Count_3+Scene_Count_4
+                        +Scene_Count_5+Scene_Count_6+Scene_Count_7+Scene_Count_8)/8,
+         Clamy_Average=(Clamy_Count_1+Clamy_Count_2+Clamy_Count_3+Clamy_Count_4
+                        +Clamy_Count_5+Clamy_Count_6+Clamy_Count_7+Clamy_Count_8)/8)%>%
+  mutate(day=as.numeric(difftime(Date, start_date, units="days"))+1)
+
+algae_dilluted_data_1=algae_dilluted_data%>%
+  filter(Flask=="1.7DC")%>%# selecting the flask we want to look at 
+  select(Scene_Average, Clamy_Average, day)
+
+
+algae_dilluted_data_subset=algae_dilluted_data%>% # selecting only the columns that we want
+  select(day, Flask, Scene_Average, Clamy_Average)
+
+algae_dilluted_data_1.7DC_S=algae_dilluted_data_1%>% # making a scene dataset
+  select(Scene_Average, day)
+
+algae_dilluted_data_1.7DC_C=algae_dilluted_data_1%>% # making a chlamy dataset
+  select(Clamy_Average, day)
+
+
+manipulate({
+  compderivs=function(t,pop,parms) { # function to descrive model 
+    with(as.list(c(pop,parms)), {
+      S=pop[1]
+      C=pop[2]
+      rS=parms[1]
+      kS=parms[2]
+      alphaS=parms[3]
+      rC=parms[4]
+      kC=parms[5]
+      alphaC=parms[6]
+      dS=rS*S*(1-(S/kS))-alphaS*S
+      dC=rC*C*(1-(C/kC))-alphaC*C
+      list(c(dS,dC))
+    }
+    )}
+  
+  
+  yinitcomp=c(0.01,0.01) # initial conditions
+  parms=c(rSs,KSs,alphaSs,rCs,KCs,alphaCs) # parameter values (they are this way for the sliders)
+  t=seq(0,19, length=1000) # time that we are looking at
+  outcomp=ode(y=yinitcomp,times=t,func = compderivs, parms=parms) # solve with the parameters that we currently have
+  outcomp=as_tibble(outcomp) # Make it into a tibble to make the plotting easier. 
+  comp_test=outcomp%>%
+    rename("Scene"=`1`, # rename the columns 
+           "Clamy"=`2`) 
+  
+ plot(algae_dilluted_data_1$day, algae_dilluted_data_1$Scene_Average, col="red",  xlim=c(0,20), ylim=c(0,30), xlab="Days", ylab="Number of Cells *10^4 cells/ml", main="Manipulate For Parameter Esitmates Plot")# plotting scene
+ points(algae_dilluted_data_1$day, algae_dilluted_data_1$Clamy_Average, col="blue", xlim=c(0,20)) # plotting chlamy
+ lines(comp_test$time, comp_test$Scene, col="red") # plotting scene prediction
+ lines(comp_test$time, comp_test$Clamy, col="blue")# plotting chlamy prediction
+ legend("topright",col = c("blue", "red"), legend=c("Chlamy", "Scene"), pch=c(1,1), lty=c(1,1), cex=0.5) # Adding a legend 
+ 
+  
+}, rSs=slider(0,2,step=0.001, initial=1.3), #sliders so that we can change the params need one slider for each param.  
+KSs=slider(0,100, initial =5, step=0.1),
+alphaSs=slider(0,2,step=0.001, initial = 0.029),
+rCs=slider(0,1.5,step=0.001, initial=.763),
+KCs=slider(0,100, initial = 90, step=0.1),
+alphaCs=slider(0,1,step=0.001, initial = 0.07))
+```
+
+
+
+## 1.7DC
+
+Here we fit the model to the 1.7mM diluted and combined sample and plotted the results. 
+
+```{r fitting to 1.7DC}
+algae_dilluted_data_17dc=algae_dilluted_data%>% 
+  filter(Flask=="1.7DC")%>% # getting only the flask we want.
+  select(Scene_Average, Clamy_Average, day, Flask)%>%
+  mutate(Scene_Average=ifelse(day==19, 4.62, Scene_Average), # We accidentally entered the last two points into the dataframe wrong so we are just changing that here  
+         Clamy_Average=ifelse(day==19, 23.8, Clamy_Average))
+
+
+algae_dilluted_data_1.7DC_S=algae_dilluted_data_17dc%>% # making a scene dataset
+  select(Scene_Average, day)
+algae_dilluted_data_1.7DC_C=algae_dilluted_data_17dc%>% # making a chlamy dataset
+  select(Clamy_Average, day)
+
+tcomp=unique(algae_dilluted_data$day) #changing our time so that it is the same as when we have data points. 
+
+sse.comp=function(parms0){  #function to calculate squared errors
+    rS=parms0[1]
+    kS=parms0[2]
+    alphaS=parms0[3]
+    rC=parms0[4]
+    kC=parms0[5]
+    alphaC=parms0[6]
+  out1comp=ode(y = yinitcomp, times = tcomp, func = compderivs, parms=c(rS,kS,alphaS,rC,kC,alphaC)) # numerically solve differential equations
+  return(c(((out1comp[,2]-algae_dilluted_data_1.7DC_S$Scene_Average)^2),(out1comp[,3]-algae_dilluted_data_1.7DC_C$Clamy_Average)^2))   #squared errors
+}
+
+
+parms17dc=c(1,5,0.029,1.5,20,0.07)# These were found using mainpulate
+
+fitcomp_17dc=modFit(f=sse.comp, p=parms17dc, lower=c(0,0,0,0,0,0), upper=c(5,100,2,2,50,2)) # modfit to minimize the sum of squared error. 
+
+fitcomp_17dc$par # take a peek at our parameter estimates 
+
+out2comp_17dc=ode(y=yinitcomp, times=t, func = compderivs, parms=fitcomp_17dc$par) # numerically solve wiht the optimal parameter estimates
+
+dc17_plot=out2comp_17dc%>% # plot the results
+  as.matrix()%>%
+  as_tibble()%>%
+  rename("Scene"=`1`)%>%
+  rename("Clamy"=`2`)%>%
+  ggplot()+
+  geom_line(aes(x=time, y=Clamy, color="#009E73"))+
+  geom_line(aes(x=time, y=Scene, color="#0072B2"))+
+  geom_point(data=algae_dilluted_data_1.7DC_C, aes(x=day, y=Clamy_Average), color="#009E73")+
+  geom_point(data=algae_dilluted_data_1.7DC_S, aes(x=day, y=Scene_Average), color="#0072B2")+
+  ggtitle("1.7DC Lotka Volterra")+
+  scale_colour_manual(name = 'Population', values =c("#009E73", "#0072B2"), labels = c("Chlamydomonas","Scenedesmus"))+
+  xlab("Days")+
+  ylab("Number of Cells *10^4 per ml")+
+  theme_light()
+
+dc17_plot
+
+```
+
+
+
+##0.34DC
+
+Here we fit the model to the 0.34 mM diluted and combined data. 
+
+```{r}
+algae_dilluted_data_34dc=algae_dilluted_data%>%
+  filter(Flask=="0.34DC")%>% # getting only the flask we want. 
+  select(Scene_Average, Clamy_Average, day)
+
+algae_dilluted_data_34dc_S=algae_dilluted_data_34dc%>%# Make one data set for each species.
+  select(Scene_Average, day)
+algae_dilluted_data_34dc_C=algae_dilluted_data_34dc%>%
+  select(Clamy_Average, day)
+
+
+tcomp=unique(algae_dilluted_data_34dc$day) # make sure time is the same as when we have data 
+
+sse.comp=function(parms0){  #function to calculate squared errors
+    rS=parms0[1]
+    kS=parms0[2]
+    alphaS=parms0[3]
+    rC=parms0[4]
+    kC=parms0[5]
+    alphaC=parms0[6]
+  out1comp=ode(y = yinitcomp, times = tcomp, func = compderivs, parms=c(rS,kS,alphaS,rC,kC,alphaC))
+  return(c(((out1comp[,2]-algae_dilluted_data_34dc_S$Scene_Average)^2),(out1comp[,3]-algae_dilluted_data_34dc_C$Clamy_Average)^2))   #sum of squared errors
+}
+parms_34dc=c(.536,25,0.029,0.87,8.5,0.04) # initial guesses from manipulate. 
+fitcomp_34dc=modFit(f=sse.comp, p=parms_34dc,lower=c(0,0,0,0,0,0),upper=c(2,100,2,2,15,2))# modFit to minimize SSE
+
+fitcomp_34dc$par # look at the parameter estimates
+
+out2comp_34dc=ode(y=yinitcomp,times=t,func = compderivs,parms=fitcomp_34dc$par)# numerically solve with the optimal parameter estimates. 
+
+dc34_plot=out2comp_34dc%>%# plot the results. 
+  as_tibble()%>%
+  rename("Scene"=`1`)%>%
+  rename("Clamy"=`2`)%>%
+  ggplot()+
+  geom_line(aes(x=time, y=Clamy, color="red"))+
+  geom_line(aes(x=time, y=Scene, color="blue"))+
+  geom_point(data=algae_dilluted_data_34dc_C, aes(x=day, y=Clamy_Average, color="red"))+
+  geom_point(data=algae_dilluted_data_34dc_S, aes(x=day, y=Scene_Average, color="blue"))+
+  ggtitle("0.34DC Lotka Volterra")+
+  scale_colour_manual(name = 'Population', values =c( "#0072B2", "#009E73"), labels = c("Scenedesmus","Chlamydomonas"))+
+  xlab("Days")+
+  ylab("Number of Cells *10^4 per ml")+
+  theme_light()
+dc34_plot
+```
+
+## 5DC
+
+Here we fit our model to our 5$\mu$M diluted and combined data. The procedure is the same as the first two sets of data that we fit. 
+
+```{r}
+algae_dilluted_data_5dc=algae_dilluted_data%>%
+  filter(Flask=="5DC")%>%
+  select(Scene_Average, Clamy_Average, day)
+
+algae_dilluted_data_5dc_S=algae_dilluted_data_5dc%>%
+  select(Scene_Average, day)
+algae_dilluted_data_5dc_C=algae_dilluted_data_5dc%>%
+  select(Clamy_Average, day)
+
+sse.comp=function(parms0){  #function to calculate squared errors
+    rS=parms0[1]
+    kS=parms0[2]
+    alphaS=parms0[3]
+    rC=parms0[4]
+    kC=parms0[5]
+    alphaC=parms0[6]
+  out1comp=ode(y = yinitcomp, times = tcomp, func = compderivs, parms=c(rS,kS,alphaS,rC,kC,alphaC))
+  return(c(((out1comp[,2]-algae_dilluted_data_5dc_S$Scene_Average)^2),(out1comp[,3]-algae_dilluted_data_5dc_C$Clamy_Average)^2))   #sum of squared errors
+}
+parms_5dc=c(1.178,19.3,.979,.555,5,.0846)
+fitcomp_5dc=modFit(f=sse.comp, p=parms_5dc,lower=c(1,18,0,0,0,0),upper=c(2,30,1,1,10,.4))
+fitcomp_5dc$par
+out2comp_5dc=ode(y=yinitcomp,times=t,func = compderivs,parms=fitcomp_5dc$par)
+
+dc5_plot=out2comp_5dc%>%
+  as_tibble()%>%
+  rename("Scene"=`1`)%>%
+  rename("Clamy"=`2`)%>%
+  ggplot()+
+  geom_line(aes(x=time, y=Clamy, color="red"))+
+  geom_line(aes(x=time, y=Scene, color="blue"))+
+  geom_point(data=algae_dilluted_data_5dc_C, aes(x=day, y=Clamy_Average, color="red"))+
+  geom_point(data=algae_dilluted_data_5dc_S, aes(x=day, y=Scene_Average, color="blue"))+
+  ggtitle("5DC Lotka Volterra")+
+  scale_colour_manual(name = 'Population', values =c( "#0072B2", "#009E73"), labels = c("Scenedesmus","Chlamydomonas"))+
+  xlab("Days")+
+  ylab("Number of Cells *10^4 per ml")+
+  theme_light()
+dc5_plot
+```
+
+## Nice Plot 
+
+Here we made the nice plot that you see on our poster. 
+
+```{r}
+out2comp_17dc=as.data.frame(out2comp_17dc) # getting all the data 
+out2comp_17dc$Flask="1.7DC"
+out2comp_34dc=as.data.frame(out2comp_34dc)
+out2comp_34dc$Flask="0.34DC"
+out2comp_5dc=as.data.frame(out2comp_5dc)
+out2comp_5dc$Flask="5DC"
+cbPalette <- c("#E69F00", "#0072B2", "#999999", "#E69F00", "#56B4E9",  "#F0E442", "#009E73" ) # selecting the color palette
+
+
+clamy_sd <- algae_dilluted_data%>% # reshaping the data
+  select(11:18)%>%
+  apply(1, sd)%>%
+  tibble() %>%
+  rename("clamy_sd" = ".")
+
+
+scene_sd <- algae_dilluted_data%>% # reshaping the data
+  select(3:10)%>%
+  apply(1, sd)%>%
+  tibble()%>%
+  rename("scene_sd" = ".")
+
+algae_dilluted_data <- bind_cols(algae_dilluted_data, clamy_sd, scene_sd) # joining them together
+
+
+
+dc_plotting_actual=algae_dilluted_data%>% # getting the data ready (more reshaping and cleaning)
+  filter(Flask=="0.34DC"| Flask=="1.7DC"| Flask=="5DC")%>%
+  select(Scene_Average, Clamy_Average, scene_sd, clamy_sd, day, Flask)%>%
+  gather("Species", "Count", 1:2)%>%
+  separate(sep="_", Species, into=c("Species", "Trash"))%>%
+  select(-Trash)%>%
+  mutate(Species=ifelse(Species=="Scene", "Scenedesmus", "Chlamydomonas"))%>%
+  mutate(Flask = ifelse(Flask == "1.7DC", "1.7 mM Diluted and Combined", Flask), 
+         Flask = ifelse(Flask == "0.34DC", "0.34 mM Diluted and Combined", Flask),
+         Flask = ifelse(Flask == "5DC", "5 uM Diluted and Combined", Flask)) %>%
+  mutate(Flask = factor((Flask), levels = c("5 uM Diluted and Combined", "0.34 mM Diluted and Combined", "1.7 mM Diluted and Combined")))
+
+
+
+
+dc_plot_data=out2comp_17dc%>% # getting the model fits ready (more reshaping and cleanign)
+  rbind(out2comp_34dc)%>%
+  rbind(out2comp_5dc)%>%
+  as_tibble()%>%
+  rename("Scenedesmus"=`1`,
+         "Chlamydomonas"=`2`)%>%
+  gather("Species", "Count", 2:3)%>%
+  mutate(Flask = ifelse(Flask == "1.7DC", "1.7 mM Diluted and Combined", Flask), 
+         Flask = ifelse(Flask == "0.34DC", "0.34 mM Diluted and Combined", Flask),
+         Flask = ifelse(Flask == "5DC", "5 uM Diluted and Combined", Flask)) %>%
+  mutate(Flask = factor((Flask), levels = c("5 uM Diluted and Combined", "0.34 mM Diluted and Combined", "1.7 mM Diluted and Combined")))
+
+
+ggplot()+ # plotting
+  geom_errorbar(data=dc_plotting_actual, # adding error bars to all the points
+                aes(x= day, 
+                    ymin=Count-clamy_sd/sqrt(8),
+                    ymax=Count+clamy_sd/sqrt(8)), 
+                  colour="grey",
+                  width=.5)+
+  geom_point(data=dc_plotting_actual, aes(x=day, y=Count, color=Species), size = 2 )+ # adding the points
+  geom_line(data=dc_plot_data, aes(x=time, y=Count, color=Species), size  = 2)+ # adding the best fit lines. 
+  facet_wrap(~Flask)+
+  ylab("Average Count (x10^4 cells/ml)")+
+  xlab("Days")+
+  theme_minimal()+
+  theme(legend.position="bottom",
+        text = element_text(size = 20),
+        axis.line = element_line(color="black"))+
+  theme(plot.margin=unit(c(1,1,1.5,1.2),"cm"))+
+  scale_colour_manual(values=cbPalette)
+  
+```
+
+## Parameter estimates
+
+Here we compare all of the parameter estimates for the the diluted and combined data. 
+
+```{r}
+fitcomp_17dc$par
+fitcomp_34dc$par
+fitcomp_5dc$par
+```
+
+
+## 1.7D
+
+Same procedure as the diluted and combined. 
+
+```{r}
+algae_dilluted_data_17d=algae_dilluted_data%>%
+  filter(Flask=="1.7D")%>%
+  select(Scene_Average, Clamy_Average, day)
+
+algae_dilluted_data_1.7d_S=algae_dilluted_data_17d%>%
+  select(Scene_Average, day)
+algae_dilluted_data_1.7d_C=algae_dilluted_data_17d%>%
+  select(Clamy_Average, day)
+sse.comp=function(parms0){  #function to calculate squared errors
+    rS=parms0[1]
+    kS=parms0[2]
+    alphaS=parms0[3]
+    rC=parms0[4]
+    kC=parms0[5]
+    alphaC=parms0[6]
+  out1comp=ode(y = yinitcomp, times = tcomp, func = compderivs, parms=c(rS,kS,alphaS,rC,kC,alphaC))
+  return(c(((out1comp[,2]-algae_dilluted_data_1.7d_S$Scene_Average)^2),(out1comp[,3]-algae_dilluted_data_1.7d_C$Clamy_Average)^2))   #sum of squared errors
+}
+
+
+parms_17d=c(.443,4,.041,.873,25.9,.43)
+fitcomp_17d=modFit(f=sse.comp, p=parms_17d,lower=c(0,0,0,0,0,0),upper=c(2,10,2,2,100,2))
+
+out2comp_17d=ode(y=yinitcomp,times=t,func = compderivs,parms=fitcomp_17d$par)
+
+out2comp_17d%>%
+  as_tibble()%>%
+  rename("Scene"=`1`)%>%
+  rename("Clamy"=`2`)%>%
+  ggplot()+
+  geom_line(aes(x=time, y=Clamy, color="red"))+
+  geom_line(aes(x=time, y=Scene, color="blue"))+
+  geom_point(data=algae_dilluted_data_1.7d_C, aes(x=day, y=Clamy_Average, color="red"))+
+  geom_point(data=algae_dilluted_data_1.7d_S, aes(x=day, y=Scene_Average, color="blue"))+
+  ggtitle("1.7D Lotka Volterra")+
+  scale_colour_manual(name = 'Population', values =c( "#0072B2", "#009E73"), labels = c("Chlamydomonas","Scenedesmus"))+
+  xlab("Days")+
+  ylab("Number of Cells *10^4 per ml")+
+  theme_light()
+
+```
+
+
+
+## 0.34D
+
+Same procedure as the diluted and combined. 
+
+```{r}
+algae_dilluted_data_34d=algae_dilluted_data%>%
+  filter(Flask=="0.34D")%>%
+  select(Scene_Average, Clamy_Average, day)
+algae_dilluted_data_0.34d_S=algae_dilluted_data_34d%>%
+  select(Scene_Average, day)
+algae_dilluted_data_0.34d_C=algae_dilluted_data_34d%>%
+  select(Clamy_Average, day)
+
+sse.comp=function(parms0){  #function to calculate squared errors
+    rS=parms0[1]
+    kS=parms0[2]
+    alphaS=parms0[3]
+    rC=parms0[4]
+    kC=parms0[5]
+    alphaC=parms0[6]
+  out1comp=ode(y = yinitcomp, times = tcomp, func = compderivs, parms=c(rS,kS,alphaS,rC,kC,alphaC))
+  return(c(((out1comp[,2]-algae_dilluted_data_0.34d_S$Scene_Average)^2),(out1comp[,3]-algae_dilluted_data_0.34d_C$Clamy_Average)^2))   #sum of squared errors
+}
+
+
+parms_34d=c(0.9,19,0.621,.785,5,.342)
+
+
+fitcomp_34d=modFit(f=sse.comp,p=parms_34d,lower=c(0,0,0,0,0,0),upper=c(2,20,2,2,150,2))
+fitcomp_34d$par
+
+out2comp_34d=ode(y=yinitcomp,times=t,func = compderivs,parms=fitcomp_34d$par)
+out2comp_34d%>%
+  as_tibble()%>%
+  rename("Scene"=`1`)%>%
+  rename("Clamy"=`2`)%>%
+  ggplot()+
+  geom_line(aes(x=time, y=Clamy, color="red"))+
+  geom_line(aes(x=time, y=Scene, color="blue"))+
+  geom_point(data=algae_dilluted_data_0.34d_C, aes(x=day, y=Clamy_Average, color="red"))+
+  geom_point(data=algae_dilluted_data_0.34d_S, aes(x=day, y=Scene_Average, color="blue"))+
+  ggtitle("0.34D Lotka Volterra")+
+  scale_colour_manual(name = 'Population', values =c( "#0072B2", "#009E73"), labels = c("Scenedesmus","Chlamydomonas"))+
+  xlab("Days")+
+  ylab("Number of Cells *10^4 per ml")+
+  theme_light()
+
+```
+
+
+## 5D
+
+Same procedure as the diluted and combined. 
+
+```{r}
+algae_dilluted_data_5d=algae_dilluted_data%>%
+  filter(Flask=="5D")%>%
+  select(Scene_Average, Clamy_Average, day)
+
+algae_dilluted_data_5d_S=algae_dilluted_data_5d%>%
+  select(Scene_Average, day)
+algae_dilluted_data_5d_C=algae_dilluted_data_5d%>%
+  select(Clamy_Average, day)
+
+
+sse.comp=function(parms0){  #function to calculate squared errors
+    rS=parms0[1]
+    kS=parms0[2]
+    alphaS=parms0[3]
+    rC=parms0[4]
+    kC=parms0[5]
+    alphaC=parms0[6]
+  out1comp=ode(y = yinitcomp, times = tcomp, func = compderivs, parms=c(rS,kS,alphaS,rC,kC,alphaC))
+  return(c(((out1comp[,2]-algae_dilluted_data_5d_S$Scene_Average)^2),(out1comp[,3]-algae_dilluted_data_5d_C$Clamy_Average)^2))   #sum of squared errors
+}
+
+
+parms_5d=c(.536,25,0.029,0.87,8.5,0.04)
+fitcomp_5d=modFit(f=sse.comp, p=parms_5d,lower=c(0,0,0,0,0,0),upper=c(2,100,2,2,15,2))
+fitcomp_5d$par
+out2comp_5d=ode(y=yinitcomp,times=t,func = compderivs,parms=fitcomp_5d$par)
+
+out2comp_5d%>%
+  as_tibble()%>%
+  rename("Scene"=`1`)%>%
+  rename("Clamy"=`2`)%>%
+  ggplot()+
+  geom_line(aes(x=time, y=Clamy, color="red"))+
+  geom_line(aes(x=time, y=Scene, color="blue"))+
+  geom_point(data=algae_dilluted_data_5d_C, aes(x=day, y=Clamy_Average, color="red"))+
+  geom_point(data=algae_dilluted_data_5d_S, aes(x=day, y=Scene_Average, color="blue"))+
+  ggtitle("5D Lotka Volterra")+
+  scale_colour_manual(name = 'Population', values =c( "#0072B2", "#009E73"), labels = c("Scenedesmus","Chlamydomonas"))+
+  xlab("Days")+
+  ylab("Number of Cells *10^4 per ml")+
+  theme_light()
+```
+
+
+## 1.7to5D
+
+Same procedure as the diluted and combined. 
+
+```{r}
+algae_dilluted_data_17to5d=algae_dilluted_data%>%
+  filter(Flask=="1.7to5")%>%
+  select(Scene_Average, Clamy_Average, day)
+
+algae_dilluted_data_1.7to5d_S=algae_dilluted_data_17to5d%>%
+  select(Scene_Average, day)
+algae_dilluted_data_1.7to5d_C=algae_dilluted_data_17to5d%>%
+  select(Clamy_Average, day)
+
+
+sse.comp=function(parms0){  #function to calculate squared errors
+    rS=parms0[1]
+    kS=parms0[2]
+    alphaS=parms0[3]
+    rC=parms0[4]
+    kC=parms0[5]
+    alphaC=parms0[6]
+  out1comp=ode(y = yinitcomp, times = tcomp, func = compderivs, parms=c(rS,kS,alphaS,rC,kC,alphaC))
+  return(c(((out1comp[,2]-algae_dilluted_data_1.7to5d_S$Scene_Average)^2),(out1comp[,3]-algae_dilluted_data_1.7to5d_C$Clamy_Average)^2))   #sum of squared errors
+}
+
+parms_17to5d=c(1.4,27,.1,1.6,11,.1)
+fitcomp_17to5d=modFit(f=sse.comp,
+                      p=parms_17to5d,lower=c(0,0,0,0,0,0),upper=c(2,100,2,2,15,2))
+fitcomp_17to5d$par
+out2comp_17to5d=ode(y=yinitcomp,times=t,func = compderivs,parms=fitcomp_17to5d$par)
+
+out2comp_17to5d%>%
+  as_tibble()%>%
+  rename("Scene"=`1`)%>%
+  rename("Clamy"=`2`)%>%
+  ggplot()+
+  geom_line(aes(x=time, y=Clamy, color="red"))+
+  geom_line(aes(x=time, y=Scene, color="blue"))+
+  geom_point(data=algae_dilluted_data_1.7to5d_C, aes(x=day, y=Clamy_Average, color="red"))+
+  geom_point(data=algae_dilluted_data_1.7to5d_S, aes(x=day, y=Scene_Average, color="blue"))+
+  ggtitle("1.7to5D Lotka Volterra")+
+  scale_colour_manual(name = 'Population', values =c( "#0072B2", "#009E73"), labels = c("Scenedesmus","Chlamydomonas"))+
+  xlab("Days")+
+  ylab("Number of Cells *10^4 per ml")+
+  theme_light()
+```
+
+
+## 5to1.7
+
+Same procedure as the diluted and combined. 
+
+```{r}
+algae_dilluted_data_5to1.7d=algae_dilluted_data%>%
+  filter(Flask=="5t01.7")%>%
+  select(Scene_Average, Clamy_Average, day)
+algae_dilluted_data_5to1.7d
+algae_dilluted_data_5to1.7d_S=algae_dilluted_data_5to1.7d%>%
+  select(Scene_Average, day)
+algae_dilluted_data_5to1.7d_C=algae_dilluted_data_5to1.7d%>%
+  select(Clamy_Average, day)
+
+sse.comp=function(parms0){  #function to calculate squared errors
+    rS=parms0[1]
+    kS=parms0[2]
+    alphaS=parms0[3]
+    rC=parms0[4]
+    kC=parms0[5]
+    alphaC=parms0[6]
+  out1comp=ode(y = yinitcomp, times = tcomp, func = compderivs, parms=c(rS,kS,alphaS,rC,kC,alphaC))
+  return(c(((out1comp[,2]-algae_dilluted_data_5to1.7d_S$Scene_Average)^2),(out1comp[,3]-algae_dilluted_data_5to1.7d_C$Clamy_Average)^2))   #sum of squared errors
+}
+algae_dilluted_data_5to1.7d
+
+parms_5to1.7d=c(0.9,12,.3,.8,5,.1)
+fitcomp_5to1.7d=modFit(f=sse.comp, p=parms_5to1.7d,lower=c(0,0,0,0,0,0),upper=c(2,150,2,2,15,2))
+fitcomp_5to1.7d$par
+out2comp_5to1.7d=ode(y=yinitcomp,times=t,func = compderivs,parms=fitcomp_5to1.7d$par)
+
+out2comp_5to1.7d%>%
+  as_tibble()%>%
+  rename("Scene"=`1`)%>%
+  rename("Clamy"=`2`)%>%
+  ggplot()+
+  geom_line(aes(x=time, y=Clamy, color="red"))+
+  geom_line(aes(x=time, y=Scene, color="blue"))+
+  geom_point(data=algae_dilluted_data_5to1.7d_C, aes(x=day, y=Clamy_Average, color="red"))+
+  geom_point(data=algae_dilluted_data_5to1.7d_S, aes(x=day, y=Scene_Average, color="blue"))+
+  ggtitle("5to1.7d Lotka Volterra")+
+  scale_colour_manual(name = 'Population', values =c( "#0072B2", "#009E73"), labels = c("Scenedesmus","Chlamydomonas"))+
+  xlab("Days")+
+  ylab("Number of Cells *10^4 per ml")+
+  theme_light()
+```
+
+
+# Sensitivity Analysis
+
+Below I create functions to do the sensitivity analysis. First I made a function that takes for inputs the data, the optimal parameter esitmates, by what percent do you want to change the parameters, initial conditions, time, and the function that describes the differential equations and returns the % change in MSE from the optimal parameter estimates. 
+
+```{r}
+sensit=function(data, optimal_params, change, yini, t, fun){
+  out_optimal=ode(yini, t, fun, optimal_params) # solve with optimal parameters
+  out_optimal=out_optimal%>% #change the shape of the data for optimal parameters
+    as.matrix()%>%
+    as_tibble()%>%
+    gather("a", "b", 2:dim(out_optimal)[2])
+  data=data%>% # change shape for our current data
+    gather("a", "b", 1:2)
+  mse_optimal=mean((data$b-out_optimal$b)^2) # calculate current 
+  mse_all=map_dbl(1:length(optimal_params), function(i){ # use a map since its faster than a for loop (essentially the same though)
+    curr_param=optimal_params[i] # select parameter i
+    param_set=optimal_params
+    param_set[param_set==curr_param]=curr_param+curr_param*(change/100) # change parameter esitmate by a "change"" percent
+    out_change=ode(yini, t, fun, param_set)# solve with new parameter estimates
+    out_change=out_change%>% # reshape solved data
+      as.matrix()%>%
+      as_tibble()%>%
+      gather("a", "b", 2:dim(out_optimal)[2])
+      mse_change=mean((data$b-out_change$b)^2)# calculate MSE for changed params
+      mse=abs(mse_change-mse_optimal)/mse_optimal # calculate percent change from optimal params
+      return(mse)
+  })
+  return(mse_all)
+}
+
+
+```
+
+Here is an example using the 1.7mM diluted and combined. As you can see the growth rate for chlamydomonas is the most sensitive at 0.245
+
+```{r}
+
+sensit(algae_dilluted_data_17dc, fitcomp_17dc$par, 1, c(.1,.1), algae_dilluted_data_17dc$day, fun=compderivs)
+
+```
+
+
+Next we built two functions that return the plotting data. We had to make two functions because the modFit function returns an object of type deSolve which doesnt coerce to a tibble very nicely(the order of columns was changing for different datasets), so this was the quickest way we could think of to solve the problem we were having. 
+
+The function below is exactly the same just we return the data instead of calculating the % change in MSE.
+
+```{r}
+sensit_plots1=function(optimal_params, change, yini, t, fun){
+  out_optimal=ode(yini, t, fun, optimal_params)
+  out_optimal=out_optimal%>%
+    as.matrix()%>%
+    as_tibble()%>%
+    rename("day"="time",
+             "Scenedesmus"=`1`,
+             "Chlamydomonas"=`2`)%>%
+    gather("Species", "Count", 2:dim(out_optimal)[2])
+  out_optimal$param_changed=0
+  plotting_data=map_df(1:length(optimal_params), function(i){
+    curr_param=optimal_params[i]
+    param_set=optimal_params
+    param_set[param_set==curr_param]=curr_param+curr_param*(change/100)
+    out_change=ode(yini, t, fun, param_set)
+    out_change1=out_change%>%
+      as.matrix()%>%
+      as_tibble()%>%
+      rename("day"="time",
+             "Scenedesmus"=`1`,
+             "Chlamydomonas"=`2`)%>%
+      gather("Species", "Count", 2:dim(out_change)[2])
+      out_change1$param_changed=i
+      return(out_change1)
+  })
+  plot_data=as_tibble(rbind(plotting_data, out_optimal))
+  return(plot_data)
+}
+```
+
+
+```{r}
+sensit_plots=function(optimal_params, change, yini, t, fun){
+  out_optimal=ode(yini, t, fun, optimal_params)
+  out_optimal=out_optimal%>%
+    as.matrix()%>%
+    as_tibble()%>%
+    rename("day"="time",
+             "Scenedesmus"=`2`,
+             "Chlamydomonas"=`1`)%>%
+    gather("Species", "Count", 2:dim(out_optimal)[2])
+  out_optimal$param_changed=0
+  plotting_data=map_df(1:length(optimal_params), function(i){
+    curr_param=optimal_params[i]
+    param_set=optimal_params
+    param_set[param_set==curr_param]=curr_param+curr_param*(change/100)
+    out_change=ode(yini, t, fun, param_set)
+    out_change1=out_change%>%
+      as.matrix()%>%
+      as_tibble()%>%
+      rename("day"="time",
+             "Scenedesmus"=`2`,
+             "Chlamydomonas"=`1`)%>%
+      gather("Species", "Count", 2:dim(out_change)[2])
+      out_change1$param_changed=i
+      return(out_change1)
+  })
+  plot_data=as_tibble(rbind(plotting_data, out_optimal))
+  return(plot_data)
+}
+```
+
+
+Below we make the plot that is seen in our poster
+
+```{r}
+
+plotting_dat=sensit_plots1(fitcomp_17dc$par, 10, c(.1,.1), seq(1,19,length=1000),  fun=compderivs)%>% # here we evaluate our functions on the three diluted and combined datasets. 
+  rbind(sensit_plots(fitcomp_34dc$par, 10, c(.1,.1), seq(1,19,length=1000), fun=compderivs))%>%
+  rbind(sensit_plots(fitcomp_5dc$par, 10, c(.1,.1), seq(1,19,length=1000), fun=compderivs))%>%
+  mutate(id=1:42000)%>% # next we reshape everything and add some better lables. 
+  mutate(Flask=ifelse(id<=14000,"1.7mM Dilluted and Combined",NA))%>%
+  mutate(Flask=ifelse(id>14000 & id<=28000,"0.34mM Dilluted and Combined", Flask))%>%
+  mutate(Flask=ifelse(id>2*42000/3,"5uM Dilluted and Combined", Flask))%>%
+  mutate(Flask=fct_relevel(Flask, "5uM Dilluted and Combined"))
+
+
+plt_dat_p1=plotting_dat%>% # selecting the optimal param portion of the data
+  filter(param_changed==0)
+plt_dat=plotting_dat%>% # selecting the optimal param portion of the data
+  filter(param_changed!=0)
+
+
+ggplot()+ # plotting the sensitivity analysis
+  geom_line(aes(x=day, y=Count, color=as.factor(param_changed), linetype=Species), data=plt_dat_p1, size=2)+
+  geom_line(aes(x=day, y=Count, color=as.factor(param_changed), linetype=Species), data=plt_dat, size=2, alpha=0.4)+
+    ylab("Average Count (x10^4 cells/ml)")+
+  xlab("Days")+
+  theme_minimal()+
+    scale_color_manual(values=c("#009E73", "#0072B2", "#999999", "#E69F00", "#56B4E9",  "#F0E442",  "#D55E00"), name="Parameter Changed", breaks=c("0", "1", "2", "3", "4", "5", "6"), labels=c("Optimal Values", "r_S", "K_S","a_S", "r_C", "K_C", "a_C"))+
+  facet_wrap(~Flask)+
+  theme(text = element_text(size = 20),
+        axis.line = element_line(color="black"))+
+  theme(plot.margin=unit(c(1,1,1.5,1.2),"cm"))+
+  theme(legend.text=element_text(size=8),
+        legend.title = element_text(size=12))
+```
+
+
+
